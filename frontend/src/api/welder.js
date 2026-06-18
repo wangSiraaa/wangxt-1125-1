@@ -1,0 +1,15 @@
+import request from '@/utils/request'
+
+export const getWelderPage = (data) => request.post('/welder/page', data)
+export const getWelderList = () => request.get('/welder/list')
+export const getWelder = (id) => request.get(`/welder/${id}`)
+export const saveWelder = (data) => request.post('/welder', data)
+export const updateWelder = (data) => request.put('/welder', data)
+export const deleteWelder = (id) => request.delete(`/welder/${id}`)
+export const checkWelderCertValid = (id) => request.get(`/welder/${id}/certValid`)
+export const getWelderCertificates = (welderId) => request.get(`/welder/${welderId}/certificates`)
+export const getCertPage = (data) => request.post('/welder/certificate/page', data)
+export const saveCertificate = (data) => request.post('/welder/certificate', data)
+export const updateCertificate = (data) => request.put('/welder/certificate', data)
+export const deleteCertificate = (id) => request.delete(`/welder/certificate/${id}`)
+export const refreshCertStatus = () => request.post('/welder/certificate/refreshStatus')
