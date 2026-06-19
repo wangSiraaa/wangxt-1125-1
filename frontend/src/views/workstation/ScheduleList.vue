@@ -2,10 +2,17 @@
   <div class="page-container">
     <div class="page-header">
       <span class="page-title">排班与开工管理</span>
-      <el-button type="primary" @click="handleAddSchedule">
-        <el-icon><Plus /></el-icon>
-        新增排班
-      </el-button>
+      <div style="display: flex; gap: 10px;">
+        <el-button type="primary" @click="handleAddSchedule">
+          <el-icon><Plus /></el-icon>
+          新增排班
+        </el-button>
+        <el-button type="warning" @click="showSafetyReviewPanel">
+          <el-icon><Warning /></el-icon>
+          安全员复核
+          <el-badge v-if="pendingReviewCount > 0" :value="pendingReviewCount" class="badge-dot" />
+        </el-button>
+      </div>
     </div>
 
     <div class="search-bar">
@@ -45,13 +52,18 @@
           {{ getCardName(row.processCardId) }}
         </template>
       </el-table-column>
+      <el-table-column prop="weldSeamNo" label="焊缝编号" width="120" />
+      <el-table-column prop="machineNo" label="机台编号" width="110" />
+      <el-table-column prop="materialBatch" label="材料批号" width="110" />
       <el-table-column prop="scheduleDate" label="排班日期" width="120" />
-      <el-table-column prop="shiftType" label="班次" width="80">
+      <el-table-column label="安全复核" width="100">
         <template #default="{ row }">
-          {{ row.shiftType === 'NIGHT' ? '夜班' : '白班' }}
+          <el-tag v-if="row.requireSafetyReview === 1" :type="row.safetyReviewId ? 'success' : 'warning'" size="small" effect="dark">
+            需复核
+          </el-tag>
+          <span v-else style="color: #999; font-size: 12px;">-</span>
         </template>
       </el-table-column>
-      <el-table-column prop="taskDesc" label="任务描述" show-overflow-tooltip />
       <el-table-column label="排班状态" width="100">
         <template #default="{ row }">
           <el-tag :type="statusType(row.scheduleStatus)" effect="dark" size="small">
@@ -59,14 +71,16 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="actualStartTime" label="实际开始" width="170" />
-      <el-table-column prop="actualEndTime" label="实际结束" width="170" />
-      <el-table-column label="操作" width="380" fixed="right">
+      <el-table-column label="操作" width="420" fixed="right">
         <template #default="{ row }">
           <div class="table-actions">
             <el-button size="small" type="primary" link @click="checkPermit(row)">
               <el-icon><Key /></el-icon>
               开工检查
+            </el-button>
+            <el-button size="small" type="info" link @click="showDetail(row)">
+              <el-icon><View /></el-icon>
+              详情
             </el-button>
             <el-button v-if="row.scheduleStatus === 'SCHEDULED'" size="small" type="warning" link @click="handleConfirmProcess(row)">
               <el-icon><DocumentChecked /></el-icon>
@@ -110,12 +124,12 @@
       @size-change="s => (page.pageSize = s, page.pageNum = 1, loadData())"
     />
 
-    <el-dialog v-model="scheduleDialog" title="新增排班" width="640px" destroy-on-close>
+    <el-dialog v-model="scheduleDialog" title="新增排班" width="700px" destroy-on-close>
       <el-form :model="scheduleForm" label-width="110px" ref="scheduleFormRef">
         <el-row :gutter="16">
           <el-col :span="12">
             <el-form-item label="工位" prop="workstationId" :rules="{ required: true, message: '请选择工位' }">
-              <el-select v-model="scheduleForm.workstationId" filterable placeholder="请选择空闲工位" style="width: 100%">
+              <el-select v-model="scheduleForm.workstationId" filterable placeholder="请选择空闲工位" style="width: 100%" @change="onWorkstationChange">
                 <el-option
                   v-for="ws in idleStationList"
                   :key="ws.id"
@@ -150,6 +164,21 @@
             </el-form-item>
           </el-col>
           <el-col :span="12">
+            <el-form-item label="焊缝编号" prop="weldSeamNo" :rules="{ required: true, message: '请输入焊缝编号' }">
+              <el-input v-model="scheduleForm.weldSeamNo" placeholder="如 WS-H1234-001" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="机台编号">
+              <el-input v-model="scheduleForm.machineNo" placeholder="如 M-001" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="材料批号">
+              <el-input v-model="scheduleForm.materialBatch" placeholder="如 B2024-001" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
             <el-form-item label="排班日期" prop="scheduleDate" :rules="{ required: true, message: '请选择排班日期' }">
               <el-date-picker v-model="scheduleForm.scheduleDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
             </el-form-item>
@@ -159,6 +188,13 @@
               <el-select v-model="scheduleForm.shiftType" style="width: 100%">
                 <el-option label="白班" value="DAY" />
                 <el-option label="夜班" value="NIGHT" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="关联动火票">
+              <el-select v-model="scheduleForm.hotWorkPermitId" clearable placeholder="选填" style="width: 100%">
+                <el-option v-for="p in hotWorkPermitOptions" :key="p.id" :label="`${p.permitNo} - ${p.hotWorkType}`" :value="p.id" />
               </el-select>
             </el-form-item>
           </el-col>
@@ -186,7 +222,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="permitDialog" title="开工许可检查" width="560px" destroy-on-close>
+    <el-dialog v-model="permitDialog" title="开工许可联动检查" width="640px" destroy-on-close>
       <div v-if="permitStatus" style="padding: 10px 0;">
         <el-result
           :icon="permitStatus.canStart ? 'success' : 'error'"
@@ -197,6 +233,9 @@
           <el-descriptions-item label="焊工资格">
             <el-tag :type="permitStatus.certValid ? 'success' : 'danger'" effect="dark">
               {{ permitStatus.certValid ? '有效' : '已过期' }}
+            </el-tag>
+            <el-tag v-if="permitStatus.certExpiring" type="warning" effect="dark" style="margin-left: 8px;">
+              即将过期(需安全员复核)
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="工艺卡确认">
@@ -209,12 +248,83 @@
               {{ permitStatus.safetyPassed ? '通过' : '未通过' }}
             </el-tag>
           </el-descriptions-item>
+          <el-descriptions-item label="高处作业">
+            <el-tag :type="permitStatus.heightWork ? 'warning' : 'success'" effect="dark">
+              {{ permitStatus.heightWork ? '存在(需安全员复核)' : '无' }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="动火票">
+            <el-tag v-if="permitStatus.hotWorkPermitId" :type="permitStatus.hotWorkPermitValid ? 'success' : 'danger'" effect="dark">
+              {{ permitStatus.hotWorkPermitValid ? '已批准' : '未批准' }}
+            </el-tag>
+            <el-tag v-else type="info" effect="dark">无关联动火票</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="工艺偏离">
+            <el-tag :type="permitStatus.deviationExists ? 'warning' : 'info'" effect="dark">
+              {{ permitStatus.deviationExists ? '存在(需安全员复核)' : '无' }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="安全员复核">
+            <el-tag v-if="permitStatus.requireSafetyReview" :type="permitStatus.safetyReviewApproved ? 'success' : 'danger'" effect="dark">
+              {{ permitStatus.safetyReviewApproved ? '已通过' : '未通过' }}
+            </el-tag>
+            <el-tag v-else type="info" effect="dark">无需复核</el-tag>
+          </el-descriptions-item>
         </el-descriptions>
         <div style="margin-top: 16px; display: flex; gap: 10px;">
           <el-button type="primary" @click="openSafetyCheck">
             <el-icon><Warning /></el-icon>
             安全检查
           </el-button>
+          <el-button v-if="permitStatus.requireSafetyReview && !permitStatus.safetyReviewApproved" type="warning" @click="showSafetyReviewFromPermit">
+            <el-icon><Warning /></el-icon>
+            查看安全员复核
+          </el-button>
+        </div>
+      </div>
+    </el-dialog>
+
+    <el-dialog v-model="detailDialog" title="开工单详情" width="720px" destroy-on-close>
+      <div v-if="scheduleDetail">
+        <el-descriptions :column="2" border title="开工单信息">
+          <el-descriptions-item label="排班单号">{{ scheduleDetail.schedule?.scheduleNo }}</el-descriptions-item>
+          <el-descriptions-item label="焊缝编号">{{ scheduleDetail.schedule?.weldSeamNo }}</el-descriptions-item>
+          <el-descriptions-item label="机台编号">{{ scheduleDetail.schedule?.machineNo || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="材料批号">{{ scheduleDetail.schedule?.materialBatch || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="返修原因">{{ scheduleDetail.schedule?.repairReason || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="需要安全复核">{{ scheduleDetail.schedule?.requireSafetyReview ? '是' : '否' }}</el-descriptions-item>
+        </el-descriptions>
+
+        <el-descriptions v-if="scheduleDetail.hotWorkPermit" :column="2" border title="关联动火票" style="margin-top: 16px;">
+          <el-descriptions-item label="动火票编号">{{ scheduleDetail.hotWorkPermit.permitNo }}</el-descriptions-item>
+          <el-descriptions-item label="动火类型">{{ scheduleDetail.hotWorkPermit.hotWorkType }}</el-descriptions-item>
+          <el-descriptions-item label="动火等级">{{ scheduleDetail.hotWorkPermit.fireLevel }}</el-descriptions-item>
+          <el-descriptions-item label="状态">{{ scheduleDetail.hotWorkPermit.permitStatus }}</el-descriptions-item>
+        </el-descriptions>
+
+        <el-descriptions v-if="scheduleDetail.safetyReview" :column="2" border title="安全员复核" style="margin-top: 16px;">
+          <el-descriptions-item label="复核单号">{{ scheduleDetail.safetyReview.reviewNo }}</el-descriptions-item>
+          <el-descriptions-item label="触发类型">{{ scheduleDetail.safetyReview.triggerType }}</el-descriptions-item>
+          <el-descriptions-item label="复核状态">{{ scheduleDetail.safetyReview.reviewStatus }}</el-descriptions-item>
+          <el-descriptions-item label="触发详情" :span="2">{{ scheduleDetail.safetyReview.triggerDetail }}</el-descriptions-item>
+        </el-descriptions>
+
+        <div v-if="scheduleDetail.weldSeamReports && scheduleDetail.weldSeamReports.length > 0" style="margin-top: 16px;">
+          <h4 style="margin-bottom: 8px;">焊缝报工 <el-tag v-if="scheduleDetail.weldSeamLocked" type="danger" size="small" effect="dark">已锁定</el-tag></h4>
+          <el-table :data="scheduleDetail.weldSeamReports" border size="small">
+            <el-table-column prop="reportNo" label="报工单号" width="160" />
+            <el-table-column prop="weldSeamNo" label="焊缝编号" width="120" />
+            <el-table-column prop="machineNo" label="机台" width="100" />
+            <el-table-column prop="materialBatch" label="材料批号" width="120" />
+            <el-table-column prop="weldStatus" label="状态" width="100">
+              <template #default="{ row }">
+                <el-tag :type="row.weldStatus === 'LOCKED' ? 'danger' : row.weldStatus === 'COMPLETED' ? 'success' : ''" size="small">
+                  {{ { IN_PROGRESS: '进行中', COMPLETED: '已完成', LOCKED: '已锁定', SUBMITTED: '已提交' }[row.weldStatus] || row.weldStatus }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="lockReason" label="锁定原因" show-overflow-tooltip />
+          </el-table>
         </div>
       </div>
     </el-dialog>
@@ -299,6 +409,45 @@
         <el-button type="primary" @click="doSuspend">确认暂停</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="safetyReviewDialog" title="安全员复核" width="700px" destroy-on-close>
+      <el-table :data="pendingReviewList" v-loading="reviewLoading" border>
+        <el-table-column prop="reviewNo" label="复核单号" width="170" />
+        <el-table-column label="焊工" width="100">
+          <template #default="{ row }">{{ getWelderName(row.welderId) }}</template>
+        </el-table-column>
+        <el-table-column label="触发类型" width="180">
+          <template #default="{ row }">
+            <el-tag v-for="t in row.triggerType.split(',')" :key="t" size="small" style="margin: 2px;"
+              :type="t === 'CERT_EXPIRING' ? 'warning' : t === 'HEIGHT_WORK' ? 'danger' : t === 'HOT_WORK_RISK' ? 'danger' : 'info'">
+              {{ { CERT_EXPIRING: '证书即将过期', HEIGHT_WORK: '高处作业并存', HOT_WORK_RISK: '动火风险', DEVIATION_EXISTS: '工艺偏离' }[t] || t }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="triggerDetail" label="触发详情" show-overflow-tooltip />
+        <el-table-column label="操作" width="200" fixed="right">
+          <template #default="{ row }">
+            <el-button type="success" size="small" @click="handleReviewApprove(row)">通过</el-button>
+            <el-button type="danger" size="small" @click="handleReviewReject(row)">驳回</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
+
+    <el-dialog v-model="reviewActionDialog" :title="reviewAction === 'approve' ? '复核通过' : '复核驳回'" width="500px" destroy-on-close>
+      <el-form label-width="100px">
+        <el-form-item v-if="reviewAction === 'approve'" label="补充安全措施">
+          <el-input v-model="reviewSafetyMeasures" type="textarea" :rows="3" placeholder="请输入补充安全措施" />
+        </el-form-item>
+        <el-form-item label="复核意见">
+          <el-input v-model="reviewOpinion" type="textarea" :rows="3" placeholder="请输入复核意见" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="reviewActionDialog = false">取消</el-button>
+        <el-button type="primary" @click="submitReviewAction">确认</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -307,12 +456,14 @@ import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Plus, Key, DocumentChecked, VideoPlay, CircleCheck, Check,
-  VideoPause, RefreshRight, Warning
+  VideoPause, RefreshRight, Warning, View
 } from '@element-plus/icons-vue'
 import {
   getSchedulePage, createSchedule, startWork, confirmProcessCard, submitFirstInspection,
   completeWork, suspendWork, resumeWork, cancelSchedule,
-  getStartPermitStatus, getSafetyChecks, saveSafetyChecks, getWorkstationList
+  getStartPermitStatus, getSafetyChecks, saveSafetyChecks, getWorkstationList,
+  getScheduleDetail, getHotWorkPermitByWorkstation,
+  getSafetyReviewPending, approveSafetyReview, rejectSafetyReview
 } from '@/api/workstation'
 import { getWelderList } from '@/api/welder'
 import { getIssuedProcessCardList, getProcessCard } from '@/api/processCard'
@@ -326,6 +477,7 @@ const searchForm = reactive({ scheduleDate: '', workstationId: null, welderId: n
 const stationList = ref([])
 const welderList = ref([])
 const issuedCardList = ref([])
+const hotWorkPermitOptions = ref([])
 
 const idleStationList = computed(() => stationList.value.filter(s => s.currentStatus === 'IDLE' && s.status === 1))
 
@@ -347,12 +499,16 @@ const scheduleDialog = ref(false)
 const scheduleFormRef = ref()
 const scheduleForm = reactive({
   workstationId: null, welderId: null, processCardId: null, scheduleDate: '',
-  shiftType: 'DAY', timeRange: null, taskDesc: ''
+  shiftType: 'DAY', timeRange: null, taskDesc: '',
+  weldSeamNo: '', machineNo: '', materialBatch: '', hotWorkPermitId: null
 })
 
 const permitDialog = ref(false)
 const permitStatus = ref(null)
 const currentSchedule = ref(null)
+
+const detailDialog = ref(false)
+const scheduleDetail = ref(null)
 
 const confirmDialog = ref(false)
 const confirmResult = ref('CONFIRMED')
@@ -364,6 +520,17 @@ const safetyCheckList = ref([])
 
 const suspendDialog = ref(false)
 const suspendReason = ref('')
+
+const safetyReviewDialog = ref(false)
+const pendingReviewList = ref([])
+const pendingReviewCount = ref(0)
+const reviewLoading = ref(false)
+
+const reviewActionDialog = ref(false)
+const reviewAction = ref('approve')
+const currentReviewRow = ref(null)
+const reviewSafetyMeasures = ref('')
+const reviewOpinion = ref('')
 
 const loadData = async () => {
   loading.value = true
@@ -382,13 +549,37 @@ const loadBaseData = async () => {
   try { issuedCardList.value = await getIssuedProcessCardList() || [] } catch (e) {}
 }
 
+const loadPendingReviews = async () => {
+  try {
+    pendingReviewList.value = await getSafetyReviewPending() || []
+    pendingReviewCount.value = pendingReviewList.value.length
+  } catch (e) {}
+}
+
 const resetSearch = () => {
   Object.assign(searchForm, { scheduleDate: '', workstationId: null, welderId: null, scheduleStatus: '' })
   loadData()
 }
 
+const onWorkstationChange = async (workstationId) => {
+  if (workstationId) {
+    try {
+      hotWorkPermitOptions.value = await getHotWorkPermitByWorkstation(workstationId) || []
+    } catch (e) {
+      hotWorkPermitOptions.value = []
+    }
+  } else {
+    hotWorkPermitOptions.value = []
+  }
+}
+
 const handleAddSchedule = () => {
-  Object.assign(scheduleForm, { workstationId: null, welderId: null, processCardId: null, scheduleDate: '', shiftType: 'DAY', timeRange: null, taskDesc: '' })
+  Object.assign(scheduleForm, {
+    workstationId: null, welderId: null, processCardId: null, scheduleDate: '',
+    shiftType: 'DAY', timeRange: null, taskDesc: '',
+    weldSeamNo: '', machineNo: '', materialBatch: '', hotWorkPermitId: null
+  })
+  hotWorkPermitOptions.value = []
   scheduleDialog.value = true
 }
 
@@ -406,6 +597,7 @@ const submitSchedule = async () => {
     scheduleDialog.value = false
     loadData()
     loadBaseData()
+    loadPendingReviews()
   })
 }
 
@@ -413,6 +605,12 @@ const checkPermit = async (row) => {
   currentSchedule.value = row
   permitStatus.value = await getStartPermitStatus(row.id)
   permitDialog.value = true
+}
+
+const showDetail = async (row) => {
+  const detail = await getScheduleDetail(row.id)
+  scheduleDetail.value = detail
+  detailDialog.value = true
 }
 
 const handleConfirmProcess = async (row) => {
@@ -466,8 +664,50 @@ const submitSafetyCheck = async () => {
   permitDialog.value = true
 }
 
+const showSafetyReviewFromPermit = () => {
+  permitDialog.value = false
+  showSafetyReviewPanel()
+}
+
+const showSafetyReviewPanel = async () => {
+  await loadPendingReviews()
+  safetyReviewDialog.value = true
+}
+
+const handleReviewApprove = (row) => {
+  currentReviewRow.value = row
+  reviewAction.value = 'approve'
+  reviewSafetyMeasures.value = ''
+  reviewOpinion.value = ''
+  reviewActionDialog.value = true
+}
+
+const handleReviewReject = (row) => {
+  currentReviewRow.value = row
+  reviewAction.value = 'reject'
+  reviewOpinion.value = ''
+  reviewActionDialog.value = true
+}
+
+const submitReviewAction = async () => {
+  if (reviewAction.value === 'approve') {
+    await approveSafetyReview(currentReviewRow.value.id, 5, reviewSafetyMeasures.value, reviewOpinion.value)
+    ElMessage.success('复核通过')
+  } else {
+    if (!reviewOpinion.value.trim()) {
+      ElMessage.warning('请输入驳回意见')
+      return
+    }
+    await rejectSafetyReview(currentReviewRow.value.id, 5, reviewOpinion.value)
+    ElMessage.success('已驳回')
+  }
+  reviewActionDialog.value = false
+  loadPendingReviews()
+  loadData()
+}
+
 const handleStart = (row) => {
-  ElMessageBox.confirm('确定要开工吗？开工前将自动检查焊工资格、工艺卡确认和安全检查。', '提示', { type: 'warning' }).then(async () => {
+  ElMessageBox.confirm('开工前将自动检查焊工资格、工艺卡确认、安全检查、动火票及安全员复核状态。', '开工确认', { type: 'warning' }).then(async () => {
     await startWork(row.id, row.welderId)
     ElMessage.success('开工成功')
     loadData()
@@ -532,5 +772,6 @@ const handleCancel = (row) => {
 onMounted(async () => {
   await loadBaseData()
   loadData()
+  loadPendingReviews()
 })
 </script>

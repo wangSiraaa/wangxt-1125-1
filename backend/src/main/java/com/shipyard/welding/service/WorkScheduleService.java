@@ -34,4 +34,6 @@ public interface WorkScheduleService extends IService<WorkSchedule> {
     void saveSafetyChecks(List<SafetyCheck> checks);
 
     Map<String, Object> getStartPermitStatus(Long scheduleId);
+
+    Map<String, Object> getScheduleDetail(Long scheduleId);
 }

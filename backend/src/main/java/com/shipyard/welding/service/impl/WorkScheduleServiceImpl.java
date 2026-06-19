@@ -16,12 +16,16 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 public class WorkScheduleServiceImpl extends ServiceImpl<WorkScheduleMapper, WorkSchedule> implements WorkScheduleService {
+
+    private static final int CERT_EXPIRING_WARNING_DAYS = 90;
 
     @Autowired
     private WorkstationMapper workstationMapper;
@@ -43,6 +47,18 @@ public class WorkScheduleServiceImpl extends ServiceImpl<WorkScheduleMapper, Wor
 
     @Autowired
     private FirstArticleInspectionMapper inspectionMapper;
+
+    @Autowired
+    private HotWorkPermitMapper hotWorkPermitMapper;
+
+    @Autowired
+    private ProcessDeviationMapper processDeviationMapper;
+
+    @Autowired
+    private SafetyReviewMapper safetyReviewMapper;
+
+    @Autowired
+    private WeldSeamReportMapper weldSeamReportMapper;
 
     @Override
     public IPage<WorkSchedule> queryPage(Map<String, Object> params) {
@@ -88,11 +104,20 @@ public class WorkScheduleServiceImpl extends ServiceImpl<WorkScheduleMapper, Wor
         if (!"ISSUED".equals(card.getCardStatus())) {
             throw new BusinessException("工艺卡未下发，无法排班");
         }
+
         String scheduleNo = "S" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
         schedule.setScheduleNo(scheduleNo);
         schedule.setScheduleStatus("SCHEDULED");
         schedule.setTeamLeaderId(teamLeaderId);
+
+        boolean needSafetyReview = checkSafetyReviewRequired(schedule, card);
+        schedule.setRequireSafetyReview(needSafetyReview ? 1 : 0);
+
         this.save(schedule);
+
+        if (needSafetyReview) {
+            createSafetyReview(schedule, card);
+        }
 
         ws.setCurrentStatus("SCHEDULED");
         workstationMapper.updateById(ws);
@@ -105,6 +130,136 @@ public class WorkScheduleServiceImpl extends ServiceImpl<WorkScheduleMapper, Wor
         processConfirmMapper.insert(confirm);
 
         return scheduleNo;
+    }
+
+    private boolean checkSafetyReviewRequired(WorkSchedule schedule, ProcessCard card) {
+        boolean certExpiring = hasCertExpiring(schedule.getWelderId());
+        boolean heightWork = hasHeightWorkOnWorkstation(schedule.getWorkstationId());
+        boolean hotWorkRisk = hasActiveHotWorkPermit(schedule.getWorkstationId());
+        boolean deviation = hasApprovedDeviation(schedule.getProcessCardId());
+        return certExpiring || heightWork || hotWorkRisk || deviation;
+    }
+
+    private boolean hasCertExpiring(Long welderId) {
+        LocalDate warningDate = LocalDate.now().plusDays(CERT_EXPIRING_WARNING_DAYS);
+        Long count = certificateMapper.selectCount(
+                new LambdaQueryWrapper<WelderCertificate>()
+                        .eq(WelderCertificate::getWelderId, welderId)
+                        .in(WelderCertificate::getCertStatus, 1, 2)
+                        .le(WelderCertificate::getExpiryDate, warningDate)
+                        .ge(WelderCertificate::getExpiryDate, LocalDate.now())
+        );
+        return count != null && count > 0;
+    }
+
+    private boolean hasHeightWorkOnWorkstation(Long workstationId) {
+        Long count = safetyCheckMapper.selectCount(
+                new LambdaQueryWrapper<SafetyCheck>()
+                        .eq(SafetyCheck::getWorkstationId, workstationId)
+                        .like(SafetyCheck::getCheckItem, "高处")
+        );
+        if (count != null && count > 0) return true;
+
+        Long hotCount = hotWorkPermitMapper.selectCount(
+                new LambdaQueryWrapper<HotWorkPermit>()
+                        .eq(HotWorkPermit::getWorkstationId, workstationId)
+                        .eq(HotWorkPermit::getPermitStatus, "APPROVED")
+        );
+        return hotCount != null && hotCount > 0;
+    }
+
+    private boolean hasActiveHotWorkPermit(Long workstationId) {
+        Long count = hotWorkPermitMapper.selectCount(
+                new LambdaQueryWrapper<HotWorkPermit>()
+                        .eq(HotWorkPermit::getWorkstationId, workstationId)
+                        .eq(HotWorkPermit::getPermitStatus, "APPROVED")
+                        .ge(HotWorkPermit::getWorkEndTime, LocalDateTime.now())
+        );
+        return count != null && count > 0;
+    }
+
+    private boolean hasApprovedDeviation(Long processCardId) {
+        Long count = processDeviationMapper.selectCount(
+                new LambdaQueryWrapper<ProcessDeviation>()
+                        .eq(ProcessDeviation::getProcessCardId, processCardId)
+                        .eq(ProcessDeviation::getDeviationStatus, "APPROVED")
+        );
+        return count != null && count > 0;
+    }
+
+    private void createSafetyReview(WorkSchedule schedule, ProcessCard card) {
+        List<String> triggerTypes = new ArrayList<>();
+        List<String> details = new ArrayList<>();
+        boolean hasHeightWork = false;
+        boolean hasHotWork = false;
+        boolean hasDeviation = false;
+        List<String> expiringCertIds = new ArrayList<>();
+
+        LocalDate warningDate = LocalDate.now().plusDays(CERT_EXPIRING_WARNING_DAYS);
+        List<WelderCertificate> expiringCerts = certificateMapper.selectList(
+                new LambdaQueryWrapper<WelderCertificate>()
+                        .eq(WelderCertificate::getWelderId, schedule.getWelderId())
+                        .in(WelderCertificate::getCertStatus, 1, 2)
+                        .le(WelderCertificate::getExpiryDate, warningDate)
+                        .ge(WelderCertificate::getExpiryDate, LocalDate.now())
+        );
+        if (!expiringCerts.isEmpty()) {
+            triggerTypes.add("CERT_EXPIRING");
+            expiringCertIds = expiringCerts.stream().map(c -> String.valueOf(c.getId())).collect(Collectors.toList());
+            details.add("焊工证书即将过期：" + expiringCerts.stream()
+                    .map(c -> c.getCertNo() + "(" + c.getCertType() + "到期:" + c.getExpiryDate() + ")")
+                    .collect(Collectors.joining("；")));
+        }
+
+        Long heightCount = safetyCheckMapper.selectCount(
+                new LambdaQueryWrapper<SafetyCheck>()
+                        .eq(SafetyCheck::getWorkstationId, schedule.getWorkstationId())
+                        .like(SafetyCheck::getCheckItem, "高处")
+        );
+        if (heightCount != null && heightCount > 0) {
+            triggerTypes.add("HEIGHT_WORK");
+            hasHeightWork = true;
+            details.add("该工位同时存在高处作业");
+        }
+
+        Long hotCount = hotWorkPermitMapper.selectCount(
+                new LambdaQueryWrapper<HotWorkPermit>()
+                        .eq(HotWorkPermit::getWorkstationId, schedule.getWorkstationId())
+                        .eq(HotWorkPermit::getPermitStatus, "APPROVED")
+        );
+        if (hotCount != null && hotCount > 0) {
+            triggerTypes.add("HOT_WORK_RISK");
+            hasHotWork = true;
+            details.add("该工位存在有效的动火票，涉及动火作业风险");
+        }
+
+        Long devCount = processDeviationMapper.selectCount(
+                new LambdaQueryWrapper<ProcessDeviation>()
+                        .eq(ProcessDeviation::getProcessCardId, schedule.getProcessCardId())
+                        .eq(ProcessDeviation::getDeviationStatus, "APPROVED")
+        );
+        if (devCount != null && devCount > 0) {
+            triggerTypes.add("DEVIATION_EXISTS");
+            hasDeviation = true;
+            details.add("该工艺卡存在已批准的工艺偏离");
+        }
+
+        SafetyReview review = new SafetyReview();
+        review.setReviewNo("SR" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss")));
+        review.setScheduleId(schedule.getId());
+        review.setWorkstationId(schedule.getWorkstationId());
+        review.setWelderId(schedule.getWelderId());
+        review.setTriggerType(String.join(",", triggerTypes));
+        review.setTriggerDetail(String.join("；", details));
+        review.setCertExpiringIds(String.join(",", expiringCertIds));
+        review.setHasHeightWork(hasHeightWork ? 1 : 0);
+        review.setHasHotWork(hasHotWork ? 1 : 0);
+        review.setHasDeviation(hasDeviation ? 1 : 0);
+        review.setReviewStatus("PENDING");
+        safetyReviewMapper.insert(review);
+
+        schedule.setSafetyReviewId(review.getId());
+        this.updateById(schedule);
     }
 
     @Override
@@ -136,6 +291,24 @@ public class WorkScheduleServiceImpl extends ServiceImpl<WorkScheduleMapper, Wor
         boolean allPassed = checks.stream().allMatch(c -> c.getCheckResult() != null && c.getCheckResult() == 1);
         if (!checks.isEmpty() && !allPassed) {
             throw new BusinessException("存在不合格的安全检查项，无法开工！");
+        }
+
+        if (schedule.getHotWorkPermitId() != null) {
+            HotWorkPermit permit = hotWorkPermitMapper.selectById(schedule.getHotWorkPermitId());
+            if (permit != null && !"APPROVED".equals(permit.getPermitStatus())) {
+                throw new BusinessException("关联的动火票未获批准，无法开工！");
+            }
+        }
+
+        if (schedule.getRequireSafetyReview() != null && schedule.getRequireSafetyReview() == 1) {
+            if (schedule.getSafetyReviewId() != null) {
+                SafetyReview review = safetyReviewMapper.selectById(schedule.getSafetyReviewId());
+                if (review == null || !"APPROVED".equals(review.getReviewStatus())) {
+                    throw new BusinessException("安全员尚未复核通过，无法开工！请等待安全员复核。");
+                }
+            } else {
+                throw new BusinessException("该排班需要安全员复核但尚未生成复核单，无法开工！");
+            }
         }
 
         schedule.setScheduleStatus("WORKING");
@@ -302,6 +475,9 @@ public class WorkScheduleServiceImpl extends ServiceImpl<WorkScheduleMapper, Wor
         boolean certValid = validCount > 0;
         result.put("certValid", certValid);
 
+        boolean certExpiring = hasCertExpiring(schedule.getWelderId());
+        result.put("certExpiring", certExpiring);
+
         ProcessConfirm confirm = processConfirmMapper.selectOne(
                 new LambdaQueryWrapper<ProcessConfirm>().eq(ProcessConfirm::getScheduleId, scheduleId)
         );
@@ -315,15 +491,87 @@ public class WorkScheduleServiceImpl extends ServiceImpl<WorkScheduleMapper, Wor
         boolean safetyPassed = checks.isEmpty() || checks.stream().allMatch(c -> c.getCheckResult() != null && c.getCheckResult() == 1);
         result.put("safetyPassed", safetyPassed);
 
-        boolean canStart = certValid && processConfirmed && safetyPassed;
+        boolean heightWork = hasHeightWorkOnWorkstation(schedule.getWorkstationId());
+        result.put("heightWork", heightWork);
+
+        boolean hotWorkPermitValid = false;
+        if (schedule.getHotWorkPermitId() != null) {
+            HotWorkPermit permit = hotWorkPermitMapper.selectById(schedule.getHotWorkPermitId());
+            hotWorkPermitValid = permit != null && "APPROVED".equals(permit.getPermitStatus());
+        }
+        result.put("hotWorkPermitValid", hotWorkPermitValid);
+        result.put("hotWorkPermitId", schedule.getHotWorkPermitId());
+
+        boolean safetyReviewApproved = true;
+        if (schedule.getRequireSafetyReview() != null && schedule.getRequireSafetyReview() == 1) {
+            if (schedule.getSafetyReviewId() != null) {
+                SafetyReview review = safetyReviewMapper.selectById(schedule.getSafetyReviewId());
+                safetyReviewApproved = review != null && "APPROVED".equals(review.getReviewStatus());
+            } else {
+                safetyReviewApproved = false;
+            }
+        }
+        result.put("safetyReviewApproved", safetyReviewApproved);
+        result.put("requireSafetyReview", schedule.getRequireSafetyReview());
+
+        boolean deviationExists = hasApprovedDeviation(schedule.getProcessCardId());
+        result.put("deviationExists", deviationExists);
+
+        boolean canStart = certValid && processConfirmed && safetyPassed && safetyReviewApproved;
         result.put("canStart", canStart);
 
         StringBuilder msg = new StringBuilder();
         if (!certValid) msg.append("焊工资格已过期；");
+        if (certExpiring) msg.append("焊工证书即将过期(需安全员复核)；");
         if (!processConfirmed) msg.append("工艺卡尚未确认；");
         if (!safetyPassed) msg.append("安全检查未通过；");
+        if (heightWork) msg.append("工位存在高处作业(需安全员复核)；");
+        if (!hotWorkPermitValid && schedule.getHotWorkPermitId() != null) msg.append("动火票未获批准；");
+        if (!safetyReviewApproved) msg.append("安全员尚未复核通过；");
+        if (deviationExists) msg.append("存在工艺偏离(需安全员复核)；");
         result.put("message", canStart ? "满足开工条件" : msg.toString());
 
         return result;
+    }
+
+    @Override
+    public Map<String, Object> getScheduleDetail(Long scheduleId) {
+        Map<String, Object> detail = new HashMap<>();
+        WorkSchedule schedule = this.getById(scheduleId);
+        if (schedule == null) {
+            return detail;
+        }
+        detail.put("schedule", schedule);
+
+        if (schedule.getWelderId() != null) {
+            List<WelderCertificate> certs = certificateMapper.selectByWelderId(schedule.getWelderId());
+            detail.put("welderCerts", certs);
+        }
+
+        if (schedule.getHotWorkPermitId() != null) {
+            HotWorkPermit permit = hotWorkPermitMapper.selectById(schedule.getHotWorkPermitId());
+            detail.put("hotWorkPermit", permit);
+        }
+
+        if (schedule.getSafetyReviewId() != null) {
+            SafetyReview review = safetyReviewMapper.selectById(schedule.getSafetyReviewId());
+            detail.put("safetyReview", review);
+        }
+
+        List<ProcessDeviation> deviations = processDeviationMapper.selectList(
+                new LambdaQueryWrapper<ProcessDeviation>()
+                        .eq(ProcessDeviation::getScheduleId, scheduleId)
+                        .eq(ProcessDeviation::getDeviationStatus, "APPROVED")
+        );
+        detail.put("deviations", deviations);
+
+        if (StringUtils.isNotBlank(schedule.getWeldSeamNo())) {
+            List<WeldSeamReport> reports = weldSeamReportMapper.selectByWeldSeamNo(schedule.getWeldSeamNo());
+            detail.put("weldSeamReports", reports);
+            long lockedCount = reports.stream().filter(r -> "LOCKED".equals(r.getWeldStatus())).count();
+            detail.put("weldSeamLocked", lockedCount > 0);
+        }
+
+        return detail;
     }
 }

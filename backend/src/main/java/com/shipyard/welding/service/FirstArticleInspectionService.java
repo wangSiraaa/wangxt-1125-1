@@ -15,4 +15,6 @@ public interface FirstArticleInspectionService extends IService<FirstArticleInsp
     String saveInspection(FirstArticleInspection inspection, Long inspectorId);
 
     void recheck(Long inspectionId, Long recheckerId, Integer recheckResult);
+
+    Map<String, Object> getRecheckDetail(Long inspectionId);
 }

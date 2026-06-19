@@ -22,6 +22,20 @@ public class WorkSchedule {
 
     private Long processCardId;
 
+    private String weldSeamNo;
+
+    private String machineNo;
+
+    private String materialBatch;
+
+    private String repairReason;
+
+    private Long hotWorkPermitId;
+
+    private Long safetyReviewId;
+
+    private Integer requireSafetyReview;
+
     private LocalDate scheduleDate;
 
     private String shiftType;

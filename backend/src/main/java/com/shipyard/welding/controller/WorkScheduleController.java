@@ -2,9 +2,7 @@ package com.shipyard.welding.controller;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.shipyard.welding.common.Result;
-import com.shipyard.welding.entity.ProcessConfirm;
-import com.shipyard.welding.entity.SafetyCheck;
-import com.shipyard.welding.entity.WorkSchedule;
+import com.shipyard.welding.entity.*;
 import com.shipyard.welding.service.WorkScheduleService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -27,6 +25,11 @@ public class WorkScheduleController {
     @GetMapping("/{id}")
     public Result<WorkSchedule> getById(@PathVariable Long id) {
         return Result.success(workScheduleService.getById(id));
+    }
+
+    @GetMapping("/{id}/detail")
+    public Result<Map<String, Object>> getDetail(@PathVariable Long id) {
+        return Result.success(workScheduleService.getScheduleDetail(id));
     }
 
     @PostMapping

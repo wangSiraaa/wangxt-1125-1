@@ -6,6 +6,7 @@ export const getInspection = (id) => request.get(`/inspection/${id}`)
 export const saveInspection = (data, inspectorId) => request.post(`/inspection?inspectorId=${inspectorId}`, data)
 export const updateInspection = (data) => request.put('/inspection', data)
 export const recheckInspection = (id, recheckerId, recheckResult) => request.post(`/inspection/${id}/recheck?recheckerId=${recheckerId}&recheckResult=${recheckResult}`)
+export const getRecheckDetail = (id) => request.get(`/inspection/${id}/recheckDetail`)
 
 export const getSuspensionList = () => request.get('/inspection/suspension/list')
 export const getSuspensionsBySchedule = (scheduleId) => request.get(`/inspection/suspension/schedule/${scheduleId}`)

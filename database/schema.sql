@@ -254,6 +254,145 @@ CREATE TABLE process_suspension (
     KEY idx_schedule_id (schedule_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='工序暂停记录表';
 
+-- ---------------------------------------------
+-- 动火票表
+-- ---------------------------------------------
+DROP TABLE IF EXISTS hot_work_permit;
+CREATE TABLE hot_work_permit (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    permit_no VARCHAR(50) NOT NULL COMMENT '动火票编号',
+    schedule_id BIGINT COMMENT '关联排班ID',
+    workstation_id BIGINT NOT NULL COMMENT '工位ID',
+    hot_work_type VARCHAR(30) NOT NULL COMMENT '动火类型: ELECTRIC_WELD-电焊, GAS_CUT-气割, GRINDING-打磨, OTHER-其他',
+    fire_level VARCHAR(20) NOT NULL COMMENT '动火等级: SPECIAL-特殊, LEVEL1-一级, LEVEL2-二级, LEVEL3-三级',
+    work_content VARCHAR(500) NOT NULL COMMENT '动火作业内容',
+    work_start_time DATETIME NOT NULL COMMENT '作业开始时间',
+    work_end_time DATETIME NOT NULL COMMENT '作业结束时间',
+    applicant_id BIGINT COMMENT '申请人ID',
+    apply_time DATETIME COMMENT '申请时间',
+    approver_id BIGINT COMMENT '审批人ID',
+    approve_time DATETIME COMMENT '审批时间',
+    permit_status VARCHAR(20) NOT NULL DEFAULT 'PENDING' COMMENT '动火票状态: PENDING-待审批, APPROVED-已批准, REJECTED-已驳回, EXPIRED-已过期, CANCELLED-已取消',
+    fire_extinguisher TINYINT DEFAULT 0 COMMENT '灭火器配备: 1-已配, 0-未配',
+    fire_watchman TINYINT DEFAULT 0 COMMENT '监火人到场: 1-到场, 0-未到场',
+    combustible_cleared TINYINT DEFAULT 0 COMMENT '可燃物已清除: 1-已清除, 0-未清除',
+    vent_check TINYINT DEFAULT 0 COMMENT '通风检查: 1-合格, 0-不合格',
+    gas_test_result VARCHAR(50) COMMENT '可燃气体检测值',
+    gas_tester_id BIGINT COMMENT '气体检测人ID',
+    gas_test_time DATETIME COMMENT '气体检测时间',
+    remark VARCHAR(500) COMMENT '备注',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_permit_no (permit_no),
+    KEY idx_schedule_id (schedule_id),
+    KEY idx_workstation_id (workstation_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='动火票表';
+
+-- ---------------------------------------------
+-- 工艺偏离表
+-- ---------------------------------------------
+DROP TABLE IF EXISTS process_deviation;
+CREATE TABLE process_deviation (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    deviation_no VARCHAR(50) NOT NULL COMMENT '偏离编号',
+    schedule_id BIGINT COMMENT '关联排班ID',
+    process_card_id BIGINT NOT NULL COMMENT '关联工艺卡ID',
+    deviation_type VARCHAR(30) NOT NULL COMMENT '偏离类型: PARAM-参数偏离, MATERIAL-材料代用, METHOD-方法变更, SEQUENCE-工序调整, OTHER-其他',
+    original_value VARCHAR(500) NOT NULL COMMENT '原工艺要求',
+    deviation_value VARCHAR(500) NOT NULL COMMENT '偏离后值',
+    deviation_reason TEXT NOT NULL COMMENT '偏离原因',
+    risk_assessment TEXT COMMENT '风险评估',
+    mitigation_measure TEXT COMMENT '缓解措施',
+    applicant_id BIGINT COMMENT '申请人ID',
+    apply_time DATETIME COMMENT '申请时间',
+    reviewer_id BIGINT COMMENT '评审人ID',
+    review_time DATETIME COMMENT '评审时间',
+    review_opinion TEXT COMMENT '评审意见',
+    deviation_status VARCHAR(20) NOT NULL DEFAULT 'PENDING' COMMENT '偏离状态: PENDING-待评审, APPROVED-已批准, REJECTED-已驳回, REVOKED-已撤销',
+    valid_until DATE COMMENT '偏离有效期至',
+    remark VARCHAR(500) COMMENT '备注',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_deviation_no (deviation_no),
+    KEY idx_schedule_id (schedule_id),
+    KEY idx_process_card_id (process_card_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='工艺偏离表';
+
+-- ---------------------------------------------
+-- 安全员复核表
+-- ---------------------------------------------
+DROP TABLE IF EXISTS safety_review;
+CREATE TABLE safety_review (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    review_no VARCHAR(50) NOT NULL COMMENT '复核单号',
+    schedule_id BIGINT NOT NULL COMMENT '关联排班ID',
+    workstation_id BIGINT NOT NULL COMMENT '工位ID',
+    welder_id BIGINT NOT NULL COMMENT '焊工ID',
+    trigger_type VARCHAR(100) NOT NULL COMMENT '触发类型: CERT_EXPIRING-证书即将过期, HEIGHT_WORK-高处作业并存, HOT_WORK_RISK-动火风险, DEVIATION_EXISTS-存在工艺偏离，多选逗号分隔',
+    trigger_detail TEXT COMMENT '触发详情',
+    cert_expiring_ids VARCHAR(200) COMMENT '即将过期的证书ID列表，逗号分隔',
+    has_height_work TINYINT DEFAULT 0 COMMENT '是否同时存在高处作业: 1-是, 0-否',
+    has_hot_work TINYINT DEFAULT 0 COMMENT '是否涉及动火: 1-是, 0-否',
+    has_deviation TINYINT DEFAULT 0 COMMENT '是否存在工艺偏离: 1-是, 0-否',
+    reviewer_id BIGINT COMMENT '安全员ID',
+    review_status VARCHAR(20) NOT NULL DEFAULT 'PENDING' COMMENT '复核状态: PENDING-待复核, APPROVED-已通过, REJECTED-已驳回',
+    review_time DATETIME COMMENT '复核时间',
+    review_opinion TEXT COMMENT '复核意见',
+    safety_measures TEXT COMMENT '补充安全措施',
+    remark VARCHAR(500) COMMENT '备注',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_review_no (review_no),
+    KEY idx_schedule_id (schedule_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='安全员复核表';
+
+-- ---------------------------------------------
+-- 焊缝报工表
+-- ---------------------------------------------
+DROP TABLE IF EXISTS weld_seam_report;
+CREATE TABLE weld_seam_report (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    report_no VARCHAR(50) NOT NULL COMMENT '报工单号',
+    schedule_id BIGINT NOT NULL COMMENT '关联排班ID',
+    weld_seam_no VARCHAR(50) NOT NULL COMMENT '焊缝编号',
+    workstation_id BIGINT NOT NULL COMMENT '工位ID',
+    welder_id BIGINT NOT NULL COMMENT '焊工ID',
+    process_card_id BIGINT NOT NULL COMMENT '工艺卡ID',
+    weld_position VARCHAR(50) COMMENT '焊接位置',
+    weld_length DECIMAL(10,2) COMMENT '焊缝长度(mm)',
+    weld_status VARCHAR(20) NOT NULL DEFAULT 'IN_PROGRESS' COMMENT '报工状态: IN_PROGRESS-进行中, COMPLETED-已完成, LOCKED-已锁定, SUBMITTED-已提交',
+    lock_reason VARCHAR(200) COMMENT '锁定原因',
+    lock_time DATETIME COMMENT '锁定时间',
+    unlock_time DATETIME COMMENT '解锁时间',
+    machine_no VARCHAR(50) COMMENT '机台编号',
+    material_batch VARCHAR(50) COMMENT '材料批号',
+    filler_material VARCHAR(100) COMMENT '填充材料',
+    work_start_time DATETIME COMMENT '焊接开始时间',
+    work_end_time DATETIME COMMENT '焊接结束时间',
+    remark VARCHAR(500) COMMENT '备注',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_report_no (report_no),
+    KEY idx_schedule_id (schedule_id),
+    KEY idx_weld_seam_no (weld_seam_no),
+    KEY idx_welder_id (welder_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='焊缝报工表';
+
+-- =============================================
+-- 排班表扩展字段（开工单关联）
+-- =============================================
+ALTER TABLE work_schedule ADD COLUMN weld_seam_no VARCHAR(50) COMMENT '焊缝编号' AFTER process_card_id;
+ALTER TABLE work_schedule ADD COLUMN machine_no VARCHAR(50) COMMENT '机台编号' AFTER weld_seam_no;
+ALTER TABLE work_schedule ADD COLUMN material_batch VARCHAR(50) COMMENT '材料批号' AFTER machine_no;
+ALTER TABLE work_schedule ADD COLUMN repair_reason VARCHAR(500) COMMENT '返修原因' AFTER material_batch;
+ALTER TABLE work_schedule ADD COLUMN hot_work_permit_id BIGINT COMMENT '关联动火票ID' AFTER repair_reason;
+ALTER TABLE work_schedule ADD COLUMN safety_review_id BIGINT COMMENT '关联安全员复核ID' AFTER hot_work_permit_id;
+ALTER TABLE work_schedule ADD COLUMN require_safety_review TINYINT NOT NULL DEFAULT 0 COMMENT '是否需要安全员复核: 1-是, 0-否' AFTER safety_review_id;
+
 -- =============================================
 -- 初始化数据
 -- =============================================

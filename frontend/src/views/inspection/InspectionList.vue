@@ -2,7 +2,31 @@
   <div class="page-container">
     <div class="page-header">
       <span class="page-title">首件质检</span>
+      <el-badge v-if="lockedCount > 0" :value="lockedCount" class="header-badge">
+        <el-button type="danger" size="small" @click="showLockedList = !showLockedList">
+          焊缝报工锁定
+        </el-button>
+      </el-badge>
     </div>
+
+    <el-alert
+      v-if="showLockedList && lockedInspections.length > 0"
+      type="error"
+      show-icon
+      :closable="false"
+      style="margin-bottom: 12px;"
+    >
+      <template #title>
+        <span>有 {{ lockedInspections.length }} 条首检不合格记录已锁定焊缝报工入口，复检通过后自动解锁</span>
+      </template>
+      <div v-for="item in lockedInspections" :key="item.id" style="margin: 4px 0; font-size: 13px;">
+        <el-tag type="danger" size="small" effect="dark">焊缝锁定</el-tag>
+        <span style="margin-left: 6px;">{{ item.inspectionNo }} — 焊缝编号: {{ item._weldSeamNo || '-' }}</span>
+        <el-button type="primary" size="small" link style="margin-left: 8px;" @click="handleView(item)">
+          查看详情
+        </el-button>
+      </div>
+    </el-alert>
 
     <div class="search-bar">
       <el-select v-model="searchForm.scheduleId" placeholder="选择排班单" clearable filterable style="width: 260px">
@@ -67,8 +91,22 @@
           </el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="焊缝报工" width="110">
+        <template #default="{ row }">
+          <template v-if="row.overallResult === 0">
+            <el-tag v-if="row._weldSeamLocked === true" type="danger" effect="dark" size="small">
+              已锁定
+            </el-tag>
+            <el-tag v-else-if="row._weldSeamLocked === false" type="warning" size="small">
+              未锁定
+            </el-tag>
+            <el-tag v-else type="info" size="small">无焊缝</el-tag>
+          </template>
+          <span v-else>-</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="inspectionTime" label="检查时间" width="170" />
-      <el-table-column label="复检" width="140">
+      <el-table-column label="复检" width="160">
         <template #default="{ row }">
           <div v-if="row.recheckRequired === 1">
             <el-tag v-if="row.recheckResult !== null" :type="row.recheckResult === 1 ? 'success' : 'danger'" size="small">
@@ -81,9 +119,10 @@
           <span v-else>无需复检</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="120" fixed="right">
+      <el-table-column label="操作" width="160" fixed="right">
         <template #default="{ row }">
           <el-button size="small" type="primary" link @click="handleView(row)">查看</el-button>
+          <el-button v-if="row.overallResult === 0 && row.recheckRequired === 1 && row.recheckResult === null" size="small" type="warning" link @click="handleRecheck(row)">复检</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -100,7 +139,7 @@
       @size-change="s => (page.pageSize = s, page.pageNum = 1, loadData())"
     />
 
-    <el-dialog v-model="dialogVisible" :title="isView ? '首件检查详情' : '提交首件检查'" width="720px" destroy-on-close>
+    <el-dialog v-model="dialogVisible" :title="isView ? '首件检查详情' : '提交首件检查'" width="780px" destroy-on-close>
       <el-form :model="form" label-width="110px" ref="formRef" :disabled="isView">
         <el-row :gutter="16">
           <el-col :span="12">
@@ -148,6 +187,31 @@
         <el-form-item label="备注">
           <el-input v-model="form.remark" type="textarea" :rows="2" />
         </el-form-item>
+
+        <template v-if="isView && viewWeldSeamNo">
+          <el-divider content-position="left">焊缝报工锁定状态</el-divider>
+          <el-descriptions :column="2" border size="small">
+            <el-descriptions-item label="焊缝编号">{{ viewWeldSeamNo }}</el-descriptions-item>
+            <el-descriptions-item label="锁定状态">
+              <el-tag v-if="viewWeldSeamLocked" type="danger" effect="dark" size="small">已锁定</el-tag>
+              <el-tag v-else type="success" size="small">正常</el-tag>
+            </el-descriptions-item>
+          </el-descriptions>
+          <el-table v-if="viewWeldSeamReports.length > 0" :data="viewWeldSeamReports" border size="small" style="margin-top: 8px; max-height: 200px; overflow-y: auto;">
+            <el-table-column prop="reportNo" label="报工单号" width="160" />
+            <el-table-column prop="weldStatus" label="状态" width="100">
+              <template #default="{ row }">
+                <el-tag v-if="row.weldStatus === 'LOCKED'" type="danger" size="small">已锁定</el-tag>
+                <el-tag v-else-if="row.weldStatus === 'IN_PROGRESS'" type="primary" size="small">施工中</el-tag>
+                <el-tag v-else-if="row.weldStatus === 'COMPLETED'" type="success" size="small">已完成</el-tag>
+                <el-tag v-else size="small">{{ row.weldStatus }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="lockReason" label="锁定原因" show-overflow-tooltip />
+            <el-table-column prop="machineNo" label="机台编号" width="120" />
+            <el-table-column prop="materialBatch" label="材料批号" width="120" />
+          </el-table>
+        </template>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">{{ isView ? '关闭' : '取消' }}</el-button>
@@ -155,7 +219,49 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="recheckDialog" title="复检" width="400px" destroy-on-close>
+    <el-dialog v-model="recheckDialog" title="复检" width="720px" destroy-on-close>
+      <el-alert
+        v-if="recheckDetail.weldSeamLocked"
+        type="error"
+        show-icon
+        :closable="false"
+        style="margin-bottom: 12px;"
+        title="该首检不合格已触发焊缝报工锁定"
+        :description="`焊缝编号 ${recheckDetail.weldSeamNo || '-'} 的所有报工入口已被锁定，复检通过后将自动解锁`"
+      />
+      <el-descriptions :column="2" border size="small" style="margin-bottom: 16px;">
+        <el-descriptions-item label="机台编号">{{ recheckDetail.machineNo || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="材料批号">{{ recheckDetail.materialBatch || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="返修原因" :span="2">{{ recheckDetail.repairReason || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="焊缝编号">{{ recheckDetail.weldSeamNo || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="焊缝报工状态">
+          <el-tag v-if="recheckDetail.weldSeamLocked" type="danger" size="small">已锁定</el-tag>
+          <el-tag v-else-if="recheckDetail.weldSeamNo" type="success" size="small">正常</el-tag>
+          <span v-else>-</span>
+        </el-descriptions-item>
+      </el-descriptions>
+
+      <el-table
+        v-if="recheckDetail.weldSeamReports && recheckDetail.weldSeamReports.length > 0"
+        :data="recheckDetail.weldSeamReports"
+        border
+        size="small"
+        style="margin-bottom: 16px; max-height: 200px; overflow-y: auto;"
+      >
+        <el-table-column prop="reportNo" label="报工单号" width="160" />
+        <el-table-column prop="weldStatus" label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag v-if="row.weldStatus === 'LOCKED'" type="danger" size="small">已锁定</el-tag>
+            <el-tag v-else-if="row.weldStatus === 'IN_PROGRESS'" type="primary" size="small">施工中</el-tag>
+            <el-tag v-else-if="row.weldStatus === 'COMPLETED'" type="success" size="small">已完成</el-tag>
+            <el-tag v-else size="small">{{ row.weldStatus }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="lockReason" label="锁定原因" show-overflow-tooltip />
+        <el-table-column prop="machineNo" label="机台编号" width="120" />
+        <el-table-column prop="materialBatch" label="材料批号" width="120" />
+      </el-table>
+
       <el-form label-width="80px">
         <el-form-item label="复检结果">
           <el-radio-group v-model="recheckResult">
@@ -190,12 +296,13 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
-  getInspectionPage, getInspection, saveInspection, updateInspection, recheckInspection
+  getInspectionPage, getInspection, saveInspection, updateInspection, recheckInspection,
+  getRecheckDetail
 } from '@/api/inspection'
-import { getSchedulePage } from '@/api/workstation'
+import { getSchedulePage, getScheduleDetail, checkWeldSeamLocked, getWeldSeamReportBySeamNo } from '@/api/workstation'
 import { getWorkstationList } from '@/api/workstation'
 import { getWelderList } from '@/api/welder'
 import { getIssuedProcessCardList } from '@/api/processCard'
@@ -211,9 +318,16 @@ const welderList = ref([])
 const issuedCardList = ref([])
 const inspectingList = ref([])
 
+const showLockedList = ref(false)
+
 const getStationName = (id) => stationList.value.find(s => s.id === id)?.stationName || ''
 const getWelderName = (id) => welderList.value.find(w => w.id === id)?.welderName || ''
 const getCardName = (id) => issuedCardList.value.find(c => c.id === id)?.cardName || ''
+
+const lockedInspections = computed(() =>
+  tableData.value.filter(r => r.overallResult === 0 && r._weldSeamLocked === true)
+)
+const lockedCount = computed(() => lockedInspections.value.length)
 
 const dialogVisible = ref(false)
 const isView = ref(false)
@@ -224,9 +338,21 @@ const form = reactive({
   defectDesc: '', rectificationAdvice: '', recheckRequired: 0, remark: ''
 })
 
+const viewWeldSeamNo = ref('')
+const viewWeldSeamLocked = ref(false)
+const viewWeldSeamReports = ref([])
+
 const recheckDialog = ref(false)
 const recheckRow = ref(null)
 const recheckResult = ref(1)
+const recheckDetail = reactive({
+  machineNo: '',
+  materialBatch: '',
+  repairReason: '',
+  weldSeamNo: '',
+  weldSeamLocked: false,
+  weldSeamReports: []
+})
 
 const loadData = async () => {
   loading.value = true
@@ -238,8 +364,29 @@ const loadData = async () => {
     })
     tableData.value = res?.records || []
     total.value = res?.total || 0
+    await loadWeldSeamLockStatus()
   } finally {
     loading.value = false
+  }
+}
+
+const loadWeldSeamLockStatus = async () => {
+  const failedRows = tableData.value.filter(r => r.overallResult === 0 && r.scheduleId)
+  if (failedRows.length === 0) return
+  for (const row of failedRows) {
+    try {
+      const detail = await getScheduleDetail(row.scheduleId)
+      const seamNo = detail?.schedule?.weldSeamNo || detail?.weldSeamNo
+      if (seamNo) {
+        row._weldSeamNo = seamNo
+        const lockRes = await checkWeldSeamLocked(seamNo)
+        row._weldSeamLocked = !!lockRes
+      } else {
+        row._weldSeamLocked = undefined
+      }
+    } catch (e) {
+      row._weldSeamLocked = undefined
+    }
   }
 }
 
@@ -267,6 +414,20 @@ const resetForm = () => {
     appearanceCheck: null, sizeCheck: null, ndtCheck: null, overallResult: null,
     defectDesc: '', rectificationAdvice: '', recheckRequired: 0, remark: ''
   })
+  viewWeldSeamNo.value = ''
+  viewWeldSeamLocked.value = false
+  viewWeldSeamReports.value = []
+}
+
+const resetRecheckDetail = () => {
+  Object.assign(recheckDetail, {
+    machineNo: '',
+    materialBatch: '',
+    repairReason: '',
+    weldSeamNo: '',
+    weldSeamLocked: false,
+    weldSeamReports: []
+  })
 }
 
 const handleNewInspection = (schedule) => {
@@ -281,8 +442,22 @@ const handleNewInspection = (schedule) => {
 
 const handleView = async (row) => {
   isView.value = true
+  viewWeldSeamNo.value = ''
+  viewWeldSeamLocked.value = false
+  viewWeldSeamReports.value = []
   const data = await getInspection(row.id)
   Object.assign(form, data)
+  if (row.overallResult === 0 && row.scheduleId) {
+    try {
+      const detail = await getRecheckDetail(row.id)
+      const seamNo = detail?.weldSeamNo || ''
+      if (seamNo) {
+        viewWeldSeamNo.value = seamNo
+        viewWeldSeamLocked.value = !!detail?.weldSeamLocked
+        viewWeldSeamReports.value = detail?.weldSeamReports || []
+      }
+    } catch (e) {}
+  }
   dialogVisible.value = true
 }
 
@@ -301,15 +476,25 @@ const submitForm = async () => {
   })
 }
 
-const handleRecheck = (row) => {
+const handleRecheck = async (row) => {
   recheckRow.value = row
   recheckResult.value = 1
+  resetRecheckDetail()
+  try {
+    const detail = await getRecheckDetail(row.id)
+    recheckDetail.machineNo = detail?.machineNo || ''
+    recheckDetail.materialBatch = detail?.materialBatch || ''
+    recheckDetail.repairReason = detail?.repairReason || ''
+    recheckDetail.weldSeamNo = detail?.weldSeamNo || ''
+    recheckDetail.weldSeamLocked = !!detail?.weldSeamLocked
+    recheckDetail.weldSeamReports = detail?.weldSeamReports || []
+  } catch (e) {}
   recheckDialog.value = true
 }
 
 const submitRecheck = async () => {
   await recheckInspection(recheckRow.value.id, 5, recheckResult.value)
-  ElMessage.success('复检结果已提交')
+  ElMessage.success(recheckResult.value === 1 ? '复检合格，焊缝报工已解锁' : '复检结果已提交')
   recheckDialog.value = false
   loadData()
 }
@@ -320,3 +505,9 @@ onMounted(async () => {
   loadInspecting()
 })
 </script>
+
+<style scoped>
+.header-badge {
+  margin-left: 16px;
+}
+</style>

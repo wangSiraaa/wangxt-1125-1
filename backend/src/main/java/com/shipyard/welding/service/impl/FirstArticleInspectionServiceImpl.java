@@ -4,22 +4,19 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.shipyard.welding.entity.FirstArticleInspection;
-import com.shipyard.welding.entity.ProcessSuspension;
-import com.shipyard.welding.entity.WorkSchedule;
-import com.shipyard.welding.entity.Workstation;
+import com.shipyard.welding.entity.*;
 import com.shipyard.welding.exception.BusinessException;
-import com.shipyard.welding.mapper.FirstArticleInspectionMapper;
-import com.shipyard.welding.mapper.ProcessSuspensionMapper;
-import com.shipyard.welding.mapper.WorkScheduleMapper;
-import com.shipyard.welding.mapper.WorkstationMapper;
+import com.shipyard.welding.mapper.*;
 import com.shipyard.welding.service.FirstArticleInspectionService;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Service
@@ -33,6 +30,15 @@ public class FirstArticleInspectionServiceImpl extends ServiceImpl<FirstArticleI
 
     @Autowired
     private ProcessSuspensionMapper processSuspensionMapper;
+
+    @Autowired
+    private WeldSeamReportMapper weldSeamReportMapper;
+
+    @Autowired
+    private WelderCertificateMapper welderCertificateMapper;
+
+    @Autowired
+    private HotWorkPermitMapper hotWorkPermitMapper;
 
     @Override
     public IPage<FirstArticleInspection> queryPage(Map<String, Object> params) {
@@ -103,6 +109,13 @@ public class FirstArticleInspectionServiceImpl extends ServiceImpl<FirstArticleI
             suspension.setReportTime(LocalDateTime.now());
             suspension.setAffectNextProcess(1);
             processSuspensionMapper.insert(suspension);
+
+            if (StringUtils.isNotBlank(schedule.getWeldSeamNo())) {
+                weldSeamReportMapper.lockByWeldSeamNo(
+                        schedule.getWeldSeamNo(),
+                        "首件检查不合格，焊缝编号" + schedule.getWeldSeamNo() + "报工入口已锁定"
+                );
+            }
         } else {
             schedule.setScheduleStatus("WORKING");
             workScheduleMapper.updateById(schedule);
@@ -161,6 +174,37 @@ public class FirstArticleInspectionServiceImpl extends ServiceImpl<FirstArticleI
                 suspension.setResolveMeasure("复检合格，解除暂停");
                 processSuspensionMapper.updateById(suspension);
             }
+
+            if (schedule != null && StringUtils.isNotBlank(schedule.getWeldSeamNo())) {
+                weldSeamReportMapper.unlockByWeldSeamNo(schedule.getWeldSeamNo());
+            }
         }
+    }
+
+    @Override
+    public Map<String, Object> getRecheckDetail(Long inspectionId) {
+        Map<String, Object> detail = new HashMap<>();
+        FirstArticleInspection inspection = this.getById(inspectionId);
+        if (inspection == null) {
+            return detail;
+        }
+        detail.put("inspection", inspection);
+
+        WorkSchedule schedule = workScheduleMapper.selectById(inspection.getScheduleId());
+        if (schedule != null) {
+            detail.put("machineNo", schedule.getMachineNo());
+            detail.put("materialBatch", schedule.getMaterialBatch());
+            detail.put("repairReason", schedule.getRepairReason());
+            detail.put("weldSeamNo", schedule.getWeldSeamNo());
+
+            if (StringUtils.isNotBlank(schedule.getWeldSeamNo())) {
+                List<WeldSeamReport> reports = weldSeamReportMapper.selectByWeldSeamNo(schedule.getWeldSeamNo());
+                detail.put("weldSeamReports", reports);
+                long lockedCount = reports.stream().filter(r -> "LOCKED".equals(r.getWeldStatus())).count();
+                detail.put("weldSeamLocked", lockedCount > 0);
+            }
+        }
+
+        return detail;
     }
 }

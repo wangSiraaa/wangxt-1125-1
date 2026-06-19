@@ -56,6 +56,11 @@ public class FirstArticleInspectionController {
         return Result.success();
     }
 
+    @GetMapping("/{id}/recheckDetail")
+    public Result<Map<String, Object>> getRecheckDetail(@PathVariable Long id) {
+        return Result.success(inspectionService.getRecheckDetail(id));
+    }
+
     @GetMapping("/suspension/list")
     public Result<List<ProcessSuspension>> suspensionList() {
         return Result.success(suspensionMapper.selectList(
