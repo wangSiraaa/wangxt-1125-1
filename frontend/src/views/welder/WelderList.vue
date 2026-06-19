@@ -59,8 +59,8 @@
       :current-page="page.pageNum"
       :page-size="page.pageSize"
       :page-sizes="[10, 20, 50]"
-      @current-change="p => (page.pageNum = p, loadData())
-      @size-change="s => (page.pageSize = s, page.pageNum = 1, loadData())
+      @current-change="p => (page.pageNum = p, loadData())"
+      @size-change="s => (page.pageSize = s, page.pageNum = 1, loadData())"
     />
 
     <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑焊工' : '新增焊工'" width="560px" destroy-on-close>
@@ -299,7 +299,11 @@ const handleEdit = (row) => {
 const submitForm = async () => {
   formRef.value.validate(async (valid) => {
     if (!valid) return
-    if (isEdit.value ? await updateWelder(form) : await saveWelder(form)
+    if (isEdit.value) {
+      await updateWelder(form)
+    } else {
+      await saveWelder(form)
+    }
     ElMessage.success(isEdit.value ? '编辑成功' : '新增成功')
     dialogVisible.value = false
     loadData()
