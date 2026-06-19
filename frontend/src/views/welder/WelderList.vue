@@ -212,6 +212,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Document } from '@element-plus/icons-vue'
 import {
   getWelderPage, saveWelder, updateWelder, deleteWelder,
   getWelderCertificates, saveCertificate, deleteCertificate, checkWelderCertValid

@@ -212,7 +212,7 @@
         </el-descriptions>
         <div style="margin-top: 16px; display: flex; gap: 10px;">
           <el-button type="primary" @click="openSafetyCheck">
-            <el-icon><Safety /></el-icon>
+            <el-icon><Warning /></el-icon>
             安全检查
           </el-button>
         </div>
@@ -305,6 +305,10 @@
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  Plus, Key, DocumentChecked, VideoPlay, CircleCheck, Check,
+  VideoPause, RefreshRight, Warning
+} from '@element-plus/icons-vue'
 import {
   getSchedulePage, createSchedule, startWork, confirmProcessCard, submitFirstInspection,
   completeWork, suspendWork, resumeWork, cancelSchedule,

@@ -173,6 +173,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus } from '@element-plus/icons-vue'
 import {
   getProcessCardPage, saveProcessCard, updateProcessCard, deleteProcessCard,
   approveProcessCard, issueProcessCard

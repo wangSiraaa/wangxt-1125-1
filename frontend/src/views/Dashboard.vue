@@ -101,6 +101,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { User, Warning, Location, CircleCheck } from '@element-plus/icons-vue'
 import { getWelderList, getCertPage, refreshCertStatus } from '@/api/welder'
 import { getWorkstationList } from '@/api/workstation'
 import { getSchedulePage } from '@/api/workstation'

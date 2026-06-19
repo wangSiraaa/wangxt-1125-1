@@ -94,6 +94,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus } from '@element-plus/icons-vue'
 import { getWorkstationPage, saveWorkstation, updateWorkstation, deleteWorkstation } from '@/api/workstation'
 
 const loading = ref(false)
